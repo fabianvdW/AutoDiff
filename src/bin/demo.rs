@@ -22,6 +22,8 @@ pub fn main(){
     println!("Dy: {}",pool.to_string(diff_graphs[1]));
     let mut map =HashMap::new();
     map.insert(x, vec![-1.,0.,1.]);
-    let dy = pool.evaluate_scalar_batch(diff_graphs[1], &map);
-    println!("Dy at [-1,0,1]: {:?}",dy)
+    map.insert(y, vec![0.,0.,1.]);
+    let (dxdy) = pool.evaluate_scalars_batch(diff_graphs, &map);
+    println!("Dx, Dy at [-1,0,1]: {:?}",dxdy);
+    pool.print_state();
 }

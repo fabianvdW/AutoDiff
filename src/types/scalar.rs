@@ -106,7 +106,7 @@ impl Pool {
             scalar.cache = Some(res.clone());
             res
         };
-        self.finished_calculating(id, scalar);
+        self.finished_calculating(scalar);
         ret
     }
 
@@ -129,28 +129,88 @@ impl Pool {
             ScalarType::Add(bl, br) => {
                 let nbl = self.diff_graph(bl, ds);
                 let nbr = self.diff_graph(br, ds);
-                nbl.into_iter()
+                let res : Vec<Id>= nbl.into_iter()
                     .zip(nbr.into_iter())
                     .map(|(a, b)| self.add(a, b))
-                    .collect()
+                    .collect();
+                self.optimize_multiple_once(&res);
+                res
             }
             ScalarType::Mul(bl, br) => {
                 let nbl = self.diff_graph(bl, ds);
                 let nbr = self.diff_graph(br, ds);
-                nbl.into_iter()
+                let res: Vec<Id> = nbl.into_iter()
                     .zip(nbr.into_iter())
                     .map(|(a, b)| {
-                        let l = self.mul(a,br);
-                        let r = self.mul(bl,b);
-                        self.add(l,r)
+                        let l = self.mul(a, br);
+                        let r = self.mul(bl, b);
+                        self.optimize_multiple_once(&[l,r]);
+                        self.add(l, r)
                     })
-                    .collect()
+                    .collect();
+                self.optimize_multiple_once(&res);
+                res
             }
         }
     }
+
+    //Optimizing IScalar's can make certain Scalars be reference dead
+    pub fn optimize(&mut self, id: Id) {
+        let mut scalar = self.calculate(id);
+        match scalar.kind {
+            ScalarType::Variable | ScalarType::Constant(_) => self.optimize_once(&mut scalar),
+            ScalarType::Add(bl, br) | ScalarType::Mul(bl, br) => {
+                self.optimize(bl);
+                self.optimize(br);
+                self.optimize_once(&mut scalar);
+            }
+        }
+        self.finished_calculating(scalar);
+    }
+
+    pub(crate) fn optimize_once(&mut self, scalar: &mut IScalar) {
+        match scalar.kind {
+            ScalarType::Variable | ScalarType::Constant(_) => {}
+            ScalarType::Add(bl, br) => {
+                let nbl = self.get(bl);
+                let nbr = self.get(br);
+                if nbl.is_zero() && nbr.is_zero() {
+                    scalar.kind = ScalarType::Constant(0.);
+                } else if nbl.is_zero() {
+                    scalar.kind = nbr.kind;
+                } else if nbr.is_zero() {
+                    scalar.kind = nbl.kind
+                }
+                if bl == br {
+                    scalar.kind = Mul(self.register_scalar_constant(2.), bl);
+                }
+            }
+            ScalarType::Mul(bl, br) => {
+                let nbl = self.get(bl);
+                let nbr = self.get(br);
+                if nbl.is_zero() || nbr.is_zero() {
+                    scalar.kind = ScalarType::Constant(0.);
+                } else if nbl.is_one() {
+                    scalar.kind = nbr.kind;
+                } else if nbr.is_one() {
+                    scalar.kind = nbl.kind;
+                }
+            }
+        }
+    }
+
+    pub fn optimize_multiple(&mut self, ids: &[Id]) {
+        ids.iter().for_each(|id| self.optimize(*id))
+    }
+    pub fn optimize_multiple_once(&mut self, ids: &[Id]) {
+        ids.iter().for_each(|id| {
+            let mut scalar = self.calculate(*id);
+            self.optimize_once(&mut scalar);
+            self.finished_calculating(scalar);
+        })
+    }
 }
 impl<'a> IScalar {
-
     pub fn is_zero(&self) -> bool {
         self.kind.is_zero()
     }
@@ -186,49 +246,4 @@ impl<'a> IScalar {
             }
         }
     }
-
-    //Optimizing IScalar's can remove certain IScalars from the graph
-    /*pub fn optimize(self) -> Self {
-        match self.kind {
-            ScalarType::Variable | ScalarType::Constant(_) => self,
-            ScalarType::Add(bl, br) => {
-                let nbl = (*bl).optimize();
-                let nbr = (*br).optimize();
-                if nbl.is_zero() && nbr.is_zero() {
-                    IScalar {
-                        id: self.id,
-                        kind: ScalarType::Constant(0.),
-                    }
-                } else if nbl.is_zero() {
-                    nbr
-                } else if nbr.is_zero() {
-                    nbl
-                } else {
-                    IScalar {
-                        id: self.id,
-                        kind: ScalarType::Add(Box::new(nbl), Box::new(nbr)),
-                    }
-                }
-            }
-            ScalarType::Mul(bl, br) => {
-                let nbl = (*bl).optimize();
-                let nbr = (*br).optimize();
-                if nbl.is_zero() || nbr.is_zero() {
-                    IScalar {
-                        id: self.id,
-                        kind: ScalarType::Constant(0.),
-                    }
-                } else if nbl.is_one() {
-                    nbr
-                } else if nbr.is_one() {
-                    nbl
-                } else {
-                    IScalar {
-                        id: self.id,
-                        kind: ScalarType::Mul(Box::new(nbl), Box::new(nbr)),
-                    }
-                }
-            }
-        }
-    }*/
 }

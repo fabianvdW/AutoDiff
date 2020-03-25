@@ -2,13 +2,14 @@ use crate::types::id::Id;
 use crate::types::pool::ExpressionStatus::Expression;
 use crate::types::scalar::{IScalar, ScalarType};
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 
 pub struct Env {
     variable_mapping: HashMap<Id, Vec<f64>>,
     batch_size: Option<usize>,
 }
 impl Env {
-    pub fn clear(&mut self){
+    pub fn clear(&mut self) {
         self.batch_size = None;
         self.variable_mapping.clear();
     }
@@ -36,17 +37,35 @@ impl Env {
         if let Some(res) = self.variable_mapping.get(&id) {
             res.clone()
         } else {
-            if let Ok(_) = pool.exists(id){
+            if let Ok(_) = pool.exists(id) {
                 let var_name = pool.find_variable_name(id);
-                if var_name.is_none(){
-                    panic!(format!("Calling env.get on an IScalar in the graph which is not in the namespace"));
-                }else{
-                    panic!(format!("Unbound variable {}, id {} does not exist in env",var_name.unwrap(),id.0));
+                if var_name.is_none() {
+                    panic!(format!(
+                        "Calling env.get on an IScalar in the graph which is not in the namespace"
+                    ));
+                } else {
+                    panic!(format!(
+                        "Unbound variable {}, id {} does not exist in env",
+                        var_name.unwrap(),
+                        id.0
+                    ));
                 }
-            } else{
-                panic!(format!("Unbound variable with id {} does not exist in the compute graph", id.0))
+            } else {
+                panic!(format!(
+                    "Unbound variable with id {} does not exist in the compute graph",
+                    id.0
+                ))
             }
         }
+    }
+}
+impl Display for Env {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Mapping: {:?}\n Batch size: {:?}",
+            self.variable_mapping, self.batch_size
+        )
     }
 }
 impl Default for Env {
@@ -67,6 +86,13 @@ impl ExpressionStatus {
         match self {
             ExpressionStatus::Expression(_) => true,
             _ => false,
+        }
+    }
+    pub fn to_string(&self, pool: &Pool) -> String {
+        match self {
+            ExpressionStatus::None => "None".to_owned(),
+            ExpressionStatus::Calculating => "Calculating".to_owned(),
+            ExpressionStatus::Expression(scalar) => scalar.to_string(pool),
         }
     }
 }
@@ -95,6 +121,7 @@ impl Pool {
             ()
         })
     }
+
     fn exists(&self, id: Id) -> Result<(), String> {
         if id.0 >= self.expr_tree.len()
             || match self.expr_tree[id.0] {
@@ -103,7 +130,7 @@ impl Pool {
             }
         {
             Err(format!("Provided id {} does not exist", id.0))
-        }else {
+        } else {
             Ok(())
         }
     }
@@ -118,7 +145,7 @@ impl Pool {
         }
     }
 
-    pub fn get(&self, id: Id) -> &IScalar {
+    pub(crate) fn get(&self, id: Id) -> &IScalar {
         if let Err(debug) = self.exists(id) {
             panic!(debug);
         }
@@ -130,7 +157,7 @@ impl Pool {
         }
     }
 
-    pub fn check(&self, id: Id) {
+    pub(crate) fn check(&self, id: Id) {
         if let Err(debug) = self.exists(id) {
             panic!(debug);
         }
@@ -138,8 +165,9 @@ impl Pool {
             panic!(format!("Provided id {} does not exist", id.0));
         }
     }
+
     pub(crate) fn calculate(&mut self, id: Id) -> IScalar {
-        if let Err(debug) = self.exists(id){
+        if let Err(debug) = self.exists(id) {
             panic!(debug);
         }
         let expr = self.expr_tree.remove(id.0);
@@ -151,20 +179,21 @@ impl Pool {
         self.expr_tree.insert(id.0, ExpressionStatus::Calculating);
         scalar
     }
-    pub(crate) fn finished_calculating(&mut self, id: Id, scalar: IScalar) {
-        if let Err(debug) = self.exists(id){
+
+    pub(crate) fn finished_calculating(&mut self, scalar: IScalar) {
+        if let Err(debug) = self.exists(scalar.id) {
             panic!(debug);
         }
-        let expr = self.expr_tree.remove(id.0);
+        let expr = self.expr_tree.remove(scalar.id.0);
         match expr {
             ExpressionStatus::Expression(_) => panic!(format!(
                 "Finished calculating the node with id {} while it was not being calculated",
-                id.0
+                scalar.id.0
             )),
             ExpressionStatus::None => panic!("already checked"),
             _ => {}
         };
-        self.expr_tree.insert(id.0, Expression(scalar));
+        self.expr_tree.insert(scalar.id.0, Expression(scalar));
     }
 
     pub fn register_scalar_variable(&mut self, name: String) -> Id {
@@ -230,10 +259,17 @@ impl Pool {
         });
     }
 
-    pub fn clear_bound_variables(&mut self){
+    pub fn clear_bound_variables(&mut self) {
         self.env.clear();
     }
 
+    pub fn print_state(&self) {
+        println!("<Pool object with:\nCurrent Id counter: {}\n\t<NameSpace with:\n\t{:?}>\n\t<Env with:\n\t{}>\nExpressions: ",self.id_counter.0, self.namespace,self.env);
+        for (i, expr) in self.expr_tree.iter().enumerate() {
+            println!("Id {}: \"{}\"", i, expr.to_string(self));
+        }
+        println!(">");
+    }
 }
 impl Default for Pool {
     fn default() -> Self {
