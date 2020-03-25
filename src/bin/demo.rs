@@ -1,22 +1,27 @@
 extern crate autodiff;
 
-use autodiff::{IScalar, ScalarType, Scalar};
-use autodiff::ScalarType::{Variable, Constant};
+use autodiff::types::pool::Pool;
+use std::collections::HashMap;
 
 pub fn main(){
-    let x = IScalar{id: 0, kind: Variable("x".to_owned())};
-    let y = IScalar{id: 1, kind: Variable("y".to_owned())};
-    let mut expr = IScalar{id: 2, kind: ScalarType::Mul(Box::new(IScalar{id: 3, kind: Constant(3.)}),
-                                                        Box::new(x.clone()))};
-    for i in 0..2{
-        expr = IScalar{id:i+4, kind: ScalarType::Mul(Box::new(x.clone()), Box::new(expr))};
+    let mut pool = Pool::default();
+    let x = pool.register_scalar_variable("x".to_owned());
+    let y = pool.register_scalar_variable("y".to_owned());
+    let three = pool.register_scalar_constant(3.);
+    let mut expr = pool.mul(three, x);
+    for _ in 0..2{
+        expr = pool.mul(x, expr);
     }
-    expr = IScalar{id:10000, kind: ScalarType::Mul(Box::new(y.clone()), Box::new(expr))};
-    println!("Expr: {}",expr.kind);
-    let ds = vec![Scalar(0), Scalar(1)];
-    let mut diff_graphs = expr.diff_graph(&ds);
-    let diff_graph_x = diff_graphs.remove(0).optimize();
-    let diff_graph_y = diff_graphs.remove(0).optimize();
-    println!("Dx: {}",diff_graph_x.kind);
-    println!("Dy: {}",diff_graph_y.kind);
+    expr = pool.mul(expr, y);
+    println!("Expr: {}",pool.to_string(expr));
+    let ds = vec![x,y];
+    let mut diff_graphs = pool.diff_graph(expr, &ds);
+    //let diff_graph_x = diff_graphs.remove(0).optimize();
+    //let diff_graph_y = diff_graphs.remove(0).optimize();
+    println!("Dx: {}",pool.to_string(diff_graphs[0]));
+    println!("Dy: {}",pool.to_string(diff_graphs[1]));
+    let mut map =HashMap::new();
+    map.insert(x, vec![-1.,0.,1.]);
+    let dy = pool.evaluate_scalar_batch(diff_graphs[1], &map);
+    println!("Dy at [-1,0,1]: {:?}",dy)
 }
