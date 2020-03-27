@@ -2,17 +2,18 @@ extern crate autodiff;
 
 use autodiff::types::pool::Pool;
 use std::collections::HashMap;
+use autodiff::types::id::Id;
 
 pub fn main(){
     let mut pool = Pool::default();
     let x = pool.register_scalar_variable("x".to_owned());
     let y = pool.register_scalar_variable("y".to_owned());
     let three = pool.register_scalar_constant(3.);
-    let mut expr = pool.mul(three, x);
+    let mut expr = pool.mul(vec![three, x]);
     for _ in 0..2{
-        expr = pool.mul(x, expr);
+        expr = pool.mul(vec![x, expr]);
     }
-    expr = pool.mul(expr, y);
+    expr = pool.mul(vec![expr, y]);
     println!("Expr: {}",pool.to_string(expr));
     let ds = vec![x,y];
     let mut diff_graphs = pool.diff_graph(expr, &ds);
@@ -23,7 +24,7 @@ pub fn main(){
     let mut map =HashMap::new();
     map.insert(x, vec![-1.,0.,1.]);
     map.insert(y, vec![0.,0.,1.]);
-    let (dxdy) = pool.evaluate_scalars_batch(diff_graphs, &map);
+    let dxdy = pool.evaluate_scalars_batch(diff_graphs, &map);
     println!("Dx, Dy at [-1,0,1]: {:?}",dxdy);
     pool.print_state();
 }

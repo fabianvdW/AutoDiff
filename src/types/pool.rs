@@ -134,6 +134,22 @@ impl Pool {
             Ok(())
         }
     }
+
+    pub fn debug_scalar(&self, id: Id){
+        let scalar = self.get(id);
+        println!("Scalar with Id {} is {}", id.0, match &scalar.kind{
+            ScalarType::Variable(id)=>format!("Variable {}",self.find_variable_name(*id).unwrap()),
+            ScalarType::Constant(value)=>format!("Constant: {}",*value),
+            ScalarType::Add(value)=>format!("Add ids: {:?}",value),
+            ScalarType::Mul(value)=>format!("Mul ids: {:?}",value)
+        });
+        match &scalar.kind{
+            ScalarType::Add(value)|ScalarType::Mul(value)=>{
+                value.iter().for_each(|id|self.debug_scalar(*id));
+            }
+            _=>{}
+        }
+    }
     //This function should only be used for debugging purposes as it's runtime is bad
     pub(crate) fn find_variable_name(&self, id: Id) -> Option<String> {
         let matches: Vec<(&String, &Id)> =
@@ -205,7 +221,7 @@ impl Pool {
         self.namespace.insert(name.clone(), res);
         self.expr_tree.push(Expression(IScalar {
             id: res,
-            kind: ScalarType::Variable,
+            kind: ScalarType::Variable(res),
             cache: None,
         }));
         res
@@ -226,28 +242,70 @@ impl Pool {
         self.env.insert(id, vec![value]);
     }
 
-    pub fn mul(&mut self, id1: Id, id2: Id) -> Id {
-        self.check(id1);
-        self.check(id2);
-        let id = self.id();
-        self.expr_tree.push(Expression(IScalar {
-            id,
-            kind: ScalarType::Mul(id1, id2),
-            cache: None,
-        }));
-        id
+    pub fn mul(&mut self, ids: Vec<Id>) -> Id {
+        ids.iter().for_each(|id|self.check(*id));
+        if ids.is_empty(){
+            panic!("Can't provide empty vec to mul");
+        }else if ids.len() ==1{
+            ids[0]
+        }else {
+            let mut scalar = IScalar {
+                id:self.id_counter,
+                kind: ScalarType::Mul(ids),
+                cache: None,
+            };
+            self.optimize_once(&mut scalar);
+            match &scalar.kind {
+                ScalarType::Variable(id) => *id,
+                ScalarType::Constant(_) => {
+                    let id = self.id();
+                    self.expr_tree.push(Expression(scalar));
+                    id
+                },
+                ScalarType::Mul(ids)|ScalarType::Add(ids)=>{
+                    if ids.len() == 1{
+                        ids[0]
+                    }else {
+                        let id = self.id();
+                        self.expr_tree.push(Expression(scalar));
+                        id
+                    }
+                }
+            }
+        }
     }
 
-    pub fn add(&mut self, id1: Id, id2: Id) -> Id {
-        self.check(id1);
-        self.check(id2);
-        let id = self.id();
-        self.expr_tree.push(Expression(IScalar {
-            id,
-            kind: ScalarType::Add(id1, id2),
-            cache: None,
-        }));
-        id
+    pub fn add(&mut self, ids: Vec<Id>) -> Id {
+        ids.iter().for_each(|id|self.check(*id));
+        if ids.is_empty(){
+            panic!("Can't provide empty vec to add");
+        }else if ids.len() == 1{
+            ids[0]
+        }else{
+            let mut scalar = IScalar {
+                id:self.id_counter,
+                kind: ScalarType::Add(ids),
+                cache: None,
+            };
+            self.optimize_once(&mut scalar);
+            match &scalar.kind{
+                ScalarType::Variable(id)=> *id,
+                ScalarType::Add(ids)|ScalarType::Mul(ids)=>{
+                    if ids.len() == 1{
+                        ids[0]
+                    }else{
+                        let id =self.id();
+                        self.expr_tree.push(Expression(scalar));
+                        id
+                    }
+                }
+                ScalarType::Constant(_)=>{
+                    let id = self.id();
+                    self.expr_tree.push(Expression(scalar));
+                    id
+                }
+            }
+        }
     }
 
     pub fn update_bound_variables(&mut self, other: &HashMap<Id, Vec<f64>>) {
